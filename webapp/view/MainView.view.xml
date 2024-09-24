@@ -1,0 +1,25 @@
+<mvc:View controllerName="com.tipsvally.testproject.controller.MainView"
+    xmlns:mvc="sap.ui.core.mvc" displayBlock="true"
+    xmlns="sap.m">
+    <Page id="page" title="{i18n>title}">
+        <Table
+            alternateRowColors="false"
+            autoPopinMode="false"
+            backgroundDesign="Translucent"
+            contextualWidth="Inherit"
+            fixedLayout="true"
+            popinLayout="Block"
+            showOverlay="false"
+            items="{btpModel>/BTPPoValidation}"
+        >
+            <columns>
+                <Column >
+                    <Label text="CMPYID"></Label>
+                </Column>
+            </columns>
+            <ColumnListItem >
+                <Label text="{btpModel>CMPYID}"></Label>
+            </ColumnListItem>
+        </Table>
+    </Page>
+</mvc:View>
