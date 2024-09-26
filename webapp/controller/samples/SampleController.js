@@ -240,7 +240,89 @@ sap.ui.define([
             // 결합된 데이터를 combinedModel에 설정
             const oCombinedModel = this.getView().getModel("combinedModel");
             oCombinedModel.setData(oData);
-        }
-        
+        },
+
+        // 외래키 관계 여부를 체크하는 함수 (async/await 사용)
+        _checkForeignKeyRelationship: async function(oModel, sEntitySetName1, sEntitySetName2) {
+            // 메타데이터 로드 확인 및 로드 대기
+            const oMetadata = await this._getMetadataAsync(oModel);
+
+            // 첫 번째 엔티티셋의 엔티티 타입 이름을 추출
+            const oEntitySet1 = this._getEntitySetProperties(oMetadata, sEntitySetName1);
+            const sEntityTypeName1 = oEntitySet1.entityTypeName;
+
+            // 두 번째 엔티티셋의 엔티티 타입 이름을 추출
+            const oEntitySet2 = this._getEntitySetProperties(oMetadata, sEntitySetName2);
+            const sEntityTypeName2 = oEntitySet2.entityTypeName;
+
+            // 첫 번째 엔티티 타입의 모든 네비게이션 속성 추출
+            const aNavigationProperties1 = this._getNavigationProperties(oMetadata, sEntityTypeName1);
+
+            // 두 번째 엔티티 타입이 첫 번째 엔티티 타입의 네비게이션 속성에 존재하는지 확인
+            const bIsRelatedFrom1To2 = aNavigationProperties1.some(navProp => navProp.toEntityType === sEntityTypeName2);
+
+            if (bIsRelatedFrom1To2) {
+                return true; // 첫 번째 엔티티셋이 두 번째 엔티티셋과 연관 관계가 있는 경우
+            }
+
+            // 두 번째 엔티티 타입의 모든 네비게이션 속성 추출
+            const aNavigationProperties2 = this._getNavigationProperties(oMetadata, sEntityTypeName2);
+
+            // 첫 번째 엔티티 타입이 두 번째 엔티티 타입의 네비게이션 속성에 존재하는지 확인
+            const bIsRelatedFrom2To1 = aNavigationProperties2.some(navProp => navProp.toEntityType === sEntityTypeName1);
+
+            return bIsRelatedFrom2To1; // 두 번째 엔티티셋이 첫 번째 엔티티셋과 연관 관계가 있는 경우
+        },
+
+        // 주어진 모델의 메타데이터를 비동기적으로 가져오는 함수 (메타데이터가 없을 경우 로드)
+        _getMetadataAsync: async function(oModel) {
+            // 메타데이터가 로드되었는지 확인
+            if (!oModel.getServiceMetadata()) {
+                // 메타데이터가 없을 경우 로드 대기
+                await oModel.metadataLoaded();
+            }
+            // 메타데이터 반환
+            return oModel.getServiceMetadata();
+        },
+
+        // 주어진 엔티티 타입의 모든 네비게이션 속성을 추출하는 함수
+        _getNavigationProperties: function(oMetadata, sEntityTypeName) {
+            // 엔티티 타입을 메타데이터에서 찾음
+            const oEntityType = oMetadata.dataServices.schema
+                .flatMap(schema => schema.entityType) // 모든 엔티티 타입 추출
+                .find(entityType => entityType.name === sEntityTypeName); // 주어진 이름의 엔티티 타입 찾기
+
+            if (!oEntityType) {
+                throw new Error(`EntityType '${sEntityTypeName}' not found.`);
+            }
+
+            // 네비게이션 속성 목록 반환
+            return oEntityType.navigationProperty.map(navProp => ({
+                name: navProp.name,               // 네비게이션 속성 이름
+                relationship: navProp.relationship, // 관계 이름
+                fromRole: navProp.fromRole,       // 시작 역할
+                toRole: navProp.toRole,           // 끝 역할
+                toEntityType: navProp.type.split('.').pop() // 대상 엔티티 타입 이름
+            }));
+        },
+
+        // 주어진 엔티티셋 이름에 대한 엔티티셋 정보를 반환하는 함수
+        _getEntitySetProperties: function(oMetadata, sEntitySetName) {
+            // 엔티티셋 정보를 메타데이터에서 찾음
+            const oEntitySet = oMetadata.dataServices.schema
+                .flatMap(schema => schema.entityContainer || []) // 모든 엔티티 컨테이너 추출
+                .flatMap(container => container.entitySet || []) // 모든 엔티티셋 추출
+                .find(entitySet => entitySet.name === sEntitySetName); // 주어진 이름의 엔티티셋 찾기
+
+            if (!oEntitySet) {
+                throw new Error(`EntitySet '${sEntitySetName}' not found.`);
+            }
+
+            // 엔티티 타입 이름과 속성 정보 반환
+            return {
+                entityTypeName: oEntitySet.entityType.split('.').pop(), // 엔티티 타입 이름
+                properties: oEntitySet.property || [] // 엔티티셋의 속성 정보 (기본적으로 빈 배열 반환)
+            };
+        }       
     });
 });

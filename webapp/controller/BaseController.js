@@ -300,6 +300,49 @@ sap.ui.define([
             // 메타데이터 반환
             return oModel.getServiceMetadata();
         },
+        
+         // EntitySet의 속성 정보 객체배열을 반환하는 함수
+         _getEntitySetProperties: function(oMetadata, sEntitySetName) {
+            if(!oMetadata) 
+                throw new Error("metadata not bean");
+            if(typeof oMetadata !== "object")
+                throw new Error("metadata parameter type don't matched object type");
+
+            // 엔티티셋 정보 찾기
+            const oEntitySet = oMetadata.dataServices.schema
+                .flatMap(oSchema => oSchema.entityContainer || []) 
+                .flatMap(oContainer => oContainer.entitySet || [])
+                .find(oEntitySet => oEntitySet.name === sEntitySetName);
+
+            if (!oEntitySet) {
+                throw new Error(`EntitySet '${sEntitySetName}' not found.`);
+            }
+
+            // 엔티티 타입 정보 찾기
+            const sEntityTypeName = oEntitySet.entityType;
+            const oEntityType = oMetadata.dataServices.schema
+                .flatMap(oSchema => oSchema.entityType)
+                .find(entityType => entityType.name === sEntityTypeName.split('.').pop());
+
+            if(!oEntityType) {
+                throw new Error(`EntityType '${sEntityTypeName}' not found.`);
+            }
+           
+            // 키 속성 목록
+            const aKeyProperties = oEntityType.key.propertyRef.map(prop => prop.name);
+
+            // 속성 정보 구성
+            const aProperties = oEntityType.property.map(prop => ({
+                name: prop.name,
+                type: prop.type,
+                isKey: aKeyProperties.includes(prop.name)
+            }));
+            
+            return {
+                entityTypeName: oEntityType.name,
+                properties: aProperties
+            };
+        },
     });
 
 });

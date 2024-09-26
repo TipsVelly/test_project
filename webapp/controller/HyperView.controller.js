@@ -133,22 +133,10 @@ sap.ui.define([
 
         // 외래키 관계 여부를 체크하는 함수
         _checkForeignKeyRelationship: async function(oModel,  sEntitySetName1, sEntitySetName2) {
-            const oMetadata = oModel.getServiceMetadata(); //모델의 메타데이터를 가져옴
-            if(!oMetadata) {
-                await oModel.metadataLoaded();
-                oMetadata = oModel.getServiceMetadata();
-            }
-            const oEntitySet1 = this._getEntitySetProperties(oMetadata, sEntitySetName1); // 첫 번째 엔티티셋 정보 추출
-            const oEntitySet2 = this._getEntitySetProperties(oMetadata, sEntitySetName2); // 두 번째 엔티티셋 정보 추출
+            // 메타데이터 로드 확인 및 로드 대기
+            const oMetadata = await this._getMetadataAsync(oModel);
 
-            // 첫 번째 엔티티셋의 모든 속성 이름을 배열로 추출
-            const aEntitySet1Properties = oEntitySet1.properties.map(prop => prop.name);
-            
-            // 두 번째 엔티티셋의 모든 속성 이름을 배열로 추출
-            const aEntitySet2Properties = oEntitySet2.properties.map(prop => prop.name);
-
-            // 첫 번째 엔티티셋의 속성 중 두 번째 엔티티셋에 존재하는 속성이 있는지 확인
-            return aEntitySet1Properties.some(prop => aEntitySet2Properties.includes(prop));
+            // 첫 번째 엔티티셋의 엔티티 타입 이름을 추출
         },
 
          // 두 EntitySet의 데이터를 읽어와 결합해서 하나의 모델로 만드는 함수
@@ -209,49 +197,6 @@ sap.ui.define([
                     });
                 }
             });
-        },
-
-        // EntitySet의 속성 정보 객체배열을 반환하는 함수
-        _getEntitySetProperties: function(oMetadata, sEntitySetName) {
-            if(!oMetadata) 
-                throw new Error("metadata not bean");
-            if(typeof oMetadata !== "object")
-                throw new Error("metadata parameter type don't matched object type");
-
-            // 엔티티셋 정보 찾기
-            const oEntitySet = oMetadata.dataServices.schema
-                .flatMap(oSchema => oSchema.entityContainer || []) 
-                .flatMap(oContainer => oContainer.entitySet || [])
-                .find(oEntitySet => oEntitySet.name === sEntitySetName);
-
-            if (!oEntitySet) {
-                throw new Error(`EntitySet '${sEntitySetName}' not found.`);
-            }
-
-            // 엔티티 타입 정보 찾기
-            const sEntityTypeName = oEntitySet.entityType;
-            const oEntityType = oMetadata.dataServices.schema
-                .flatMap(oSchema => oSchema.entityType)
-                .find(entityType => entityType.name === sEntityTypeName.split('.').pop());
-
-            if(!oEntityType) {
-                throw new Error(`EntityType '${sEntityTypeName}' not found.`);
-            }
-           
-            // 키 속성 목록
-            const aKeyProperties = oEntityType.key.propertyRef.map(prop => prop.name);
-
-            // 속성 정보 구성
-            const aProperties = oEntityType.property.map(prop => ({
-                name: prop.name,
-                type: prop.type,
-                isKey: aKeyProperties.includes(prop.name)
-            }));
-            
-            return {
-                entityTypeName: oEntityType.name,
-                properties: aProperties
-            };
         },
 
         // CRUD 작업을 위한 공통함수
