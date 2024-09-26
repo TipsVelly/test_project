@@ -28,23 +28,34 @@ sap.ui.define([
                 data: []
             });
             this.getView().setModel(oCombinedModel, "combinedModel");
+            this.odata_01_name = "Customers";
+            this.odata_02_name = "BTPPoValidation";
         },
-        loadCombinedData: function() {
+        loadCombinedData: async function() {
             // 두 EntitySet의 데이터를 읽어와 결합하는 함수
-            const northwindModel = this.getOwnerComponent().getModel("northwindModel");
-            const btpModel = this.getOwnerComponent().getModel("btpModel");
+            const northwindModel =this.odataModel1 = this.getOwnerComponent().getModel("northwindModel");
+            const btpModel = this.odataModel2 = this.getOwnerComponent().getModel("btpModel");
             
-            
+            // await northwindModel.metadataLoaded();
+            // await btpModel.metadataLoaded();
 
+            console.log("metadata loaded.");
+            
             // 첫 번째 EntitySet 데이터 읽기
-            northwindModel.read("/Customers", {
+            northwindModel.read(`/${this.odata_01_name}`, {
                 success: (oData1) => {
-                    console.log("oData1", oData1);
+                    
+
                     // 두 번째 EntitySet 데이터 읽기
-                    btpModel.read("/BTPPoValidation", {
+                    btpModel.read(`/${this.odata_02_name}`, {
                         success: (oData2) => {
-                            console.log("oData2", oData2);
                             // 두 데이터 통합
+                            // 첫 번째 odata EntitySet metadata 읽기
+                            const oMetadata1 = this.odataModel1.getServiceMetadata();
+
+                            // 두 번째 odata entitySet metadata 읽기
+                            const oMetadata2 = this.odataModel2.getServiceMetadata();
+
                             const oCombinedData = oData1.results.map((item1, index) => {
                                 // oData2의 인덱스에 해당하는 아이템이 있는지 확인
                                 const item2 = oData2.results[index] || {}; // 존재하지 않으면 빈 객체로 반환
@@ -54,26 +65,21 @@ sap.ui.define([
                                     id: index,
                                     ...item1,
                                     ...item2,
-                                    __metadata:[
-                                        {...item1.__metadata, properties: Object.keys(item1).filter(key => key !== '__metadata')},
-                                        {...(item2.__metadata || {}), properties: Object.keys(item2).filter(key => key !== '__metadata')}
-                                    ]
+                                    __metadata:[]
                                 }
                             });
                             const oNewModelData = {
                                 metadata: [
-                                    {
-                                        ...oData1.results[0].__metadata,
+                                    {   
                                         uri: oData1.results[0].__metadata.uri.split("(")[0],
-                                        properties: Object.keys(oData1.results[0]).filter(key => key !== '__metadata')
+                                        entityType: this._getEntitySetProperties(oMetadata1, this.odata_01_name)
                                     },
                                     {
-                                        ...oData2.results[0].__metadata,
                                         uri: oData2.results[0].__metadata.uri.split("(")[0],
-                                        properties: Object.keys(oData2.results[0]).filter(key => key !== '__metadata')
+                                        entityType: this._getEntitySetProperties(oMetadata2, this.odata_02_name)
                                     }
                                 ],
-                                results: oCombinedData
+                                data: oCombinedData
                             }
                             
                             // JSON Model에 결합된 데이터 설정
@@ -84,6 +90,55 @@ sap.ui.define([
                 }
             });
         },
+
+        // EntitySet의 속성 정보 객체배열을 반환하는 함수
+        _getEntitySetProperties: function(oMetadata, sEntitySetName) {
+            if(!oMetadata) 
+                throw new Error("metadata not bean");
+            if(typeof oMetadata !== "object")
+                throw new Error("metadata parameter type don't matched object type");
+
+            // 엔티티셋 정보 찾기
+            const oEntitySet = oMetadata.dataServices.schema
+                .flatMap(oSchema => oSchema.entityContainer || []) 
+                .flatMap(oContainer => oContainer.entitySet || [])
+                .find(oEntitySet => oEntitySet.name === sEntitySetName);
+
+            if (!oEntitySet) {
+                throw new Error(`EntitySet '${sEntitySetName}' not found.`);
+            }
+
+            // 엔티티 타입 정보 찾기
+            const sEntityTypeName = oEntitySet.entityType;
+            const oEntityType = oMetadata.dataServices.schema
+                .flatMap(oSchema => oSchema.entityType)
+                .find(entityType => entityType.name === sEntityTypeName.split('.').pop());
+
+            if(!oEntityType) {
+                throw new Error(`EntityType '${sEntityTypeName}' not found.`);
+            }
+           
+            // 키 속성 목록
+            const aKeyProperties = oEntityType.key.propertyRef.map(prop => prop.name);
+
+            // 속성 정보 구성
+            const aProperties = oEntityType.property.map(prop => ({
+                name: prop.name,
+                type: prop.type,
+                isKey: aKeyProperties.includes(prop.name)
+            }));
+            
+            return {
+                entityTypeName: oEntityType.name,
+                properties: aProperties
+            };
+        },
+
+        // CRUD 작업을 위한 공통함수
+        performCrudOperation: async function(action, entityData) {
+
+        },
+
         initDefaultInfo: function() {
             //기본 변수값 설정 함수
             this.isUpdated = false;

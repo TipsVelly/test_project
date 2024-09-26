@@ -40,7 +40,7 @@
 			</f:DynamicPageHeader>
 		</f:header>
 		<f:content>
-			<Table id="main_table" growing="true" growingThreshold="20" growingScrollToLoad="true" mode="MultiSelect" itemPress="onListItemPress" items="{combinedModel>/results}" width="auto" class="sapUiMediumMarginBottom">
+			<Table id="main_table" growing="true" growingThreshold="20" growingScrollToLoad="true" mode="MultiSelect" itemPress="onListItemPress" items="{combinedModel>/data}" width="auto" class="sapUiMediumMarginBottom">
 				<headerToolbar>
 					<OverflowToolbar>
 						<ToolbarSpacer>
