@@ -19,23 +19,143 @@ sap.ui.define([
             // ROUTER URL MATCH EVENT 함수
             this.search_model.setData({});
             // this.onSearch();
-            this.loadCombinedData();
+            // this.loadCombinedData();
+            this.loadCombinedDataV2(...this.aOModelOptions);
         },
         initDefaultInfo2: function() {
             // JSON Model 생성
             const oCombinedModel = new JSONModel({
-                __metadata: [],
+                metadata: [],
                 data: []
             });
             this.getView().setModel(oCombinedModel, "combinedModel");
-            this.odata_01_name = "Customers";
-            this.odata_02_name = "BTPPoValidation";
+
+            this.aOModelOptions = [];
+
+            this.aOModelOptions[0] = {
+                oModel: this.getOwnerComponent().getModel("northwindModel"),
+                sEntitySet: "Customers",
+                joinProperty: "Name1",
+            };
+            this.aOModelOptions[1] = {
+                oModel: this.getOwnerComponent().getModel("btpModel"),
+                sEntitySet: "BTPPoValidation",
+                joinProperty: "Name2",
+            };
         },
-        loadCombinedData: async function() {
-            // 두 EntitySet의 데이터를 읽어와 결합하는 함수
-            const northwindModel =this.odataModel1 = this.getOwnerComponent().getModel("northwindModel");
-            const btpModel = this.odataModel2 = this.getOwnerComponent().getModel("btpModel");
+
+        
+        loadCombinedDataV2: async function(...aOptions) {
+            try {
+                // 각 모델의 Service URL을 추출하여 배열에 저장
+                const aServiceUrls = aOptions.map(({oModel}) => oModel.sServiceUrl);
+                // 첫 번째 모델의 Service URL을 메인 URL로 설정
+                const sMainServiceUrl = aServiceUrls[0];
+
+                // 확장할 엔티티셋 이름들을 저장할 배열
+                const aExpandEntities = [];
+
+                // 강제 조인 조건을 저장할 배열
+                const aJoinConditions = [];
+
+                // 첫 번째 모델 옵션을 메인옵션으로 설정
+                const oMainOption = aOptions[0];
+
+                // 메인 서비스 URL과 나머지 서비스 URL 비교
+                for (let i = 1; i < aServiceUrls.length; i++) {
+                    const sServiceUrl = aServiceUrls[i];
+                    const oCurrentOption = aOptions[i];
+
+                    if(sServiceUrl === sMainServiceUrl) {
+                        // 메인 서비스 URL과 같을 경우, 외래키 여부 체크
+                        const isForeignKeyRelated = this._checkForeignKeyRelationship(
+                            oMainOption.oModel,         // 메인 모델
+                            oMainOption.sEntitySet,     // 메인 엔티티셋 이름
+                            oCurrentOption.sEntitySet   // 현재 비교하는 엔티티셋 이름
+                        );
+
+                        if(isForeignKeyRelated) {
+                            // 외래키 관계가 있을 경우, 확장할 엔티티셋 이름 추가
+                            aExpandEntities.push(oCurrentOption.sEntitySet);
+                            console.log(`Foreign key relation found. Adding ${oCurrentOption.sEntitySet} to expand list.`);
+                        } else {
+                            // 외래키 관계가 없으면 강제 조언 조건으로 'joinProperty'를 사용
+                            aJoinConditions.push({
+                                mainEntitySet: oMainOption.sEntitySet, // 메인 엔티티셋 이름
+                                joinEntitySet: oCurrentOption.sEntitySet,    // 조인할 엔티티셋 이름
+                                mainJoinProperty: oMainOption.joinProperty,  // 메인 조인 프로퍼티
+                                joinJoinProperty: oCurrentOption.joinProperty // 조인할 조인 프로퍼티
+                            });
+                        }
+                    } else {
+                        // 메인 서비스 URL과 다를 경우에도 강제 조인 조건으로 `joinProperty` 사용
+                        aJoinConditions.push({
+                            mainEntitySet: oMainOption.sEntitySet,       // 메인 엔티티셋 이름
+                            joinEntitySet: oCurrentOption.sEntitySet,    // 조인할 엔티티셋 이름
+                            mainJoinProperty: oMainOption.joinProperty,  // 메인 조인 프로퍼티
+                            joinJoinProperty: oCurrentOption.joinProperty // 조인할 조인 프로퍼티
+                        });
+                    }
+
+                    if(aExpandEntities.length > 0) {
+                        // $expand를 위한 쿼리 문자열을 생성
+                        const sExpandQuery = aExpandEntities.join(',');
+
+                        console.log(`Fetching data with $expand: ${sExpandQuery}`);
+
+                        // 메인 모델에서 $expand를 사용하여 데이터 읽기
+                        oMainOption.oModel.read(`/${oMainOption.sEntitySet}`, {
+                            urlParameters: {
+                                "$expand": sExpandQuery // 동적으로 생성된 $expand 쿼리 설정
+                            },
+                            success: (oData) => {
+                                // 데이터 결합 후 모델에 바인딩
+                                this._bindCombinedModel(oData);
+                            },
+                            error: (oError) => {
+                                console.error("Error fetching data with $expand:", oError);
+                            }
+                        });
+                    }
+
+                    if (aJoinConditions.length > 0) {
+                        // 강제 조인 조건에 따라 데이터를 가져와 조인
+                        for (const condition of aJoinConditions) {
+                            this._performForcedJoin(oMainOption, condition);
+                        }
+                    }
+                }
+
+            } catch (error) {
+                onsole.error("Error loading combined data:", error);
+            }
+        },
+
+        // 외래키 관계 여부를 체크하는 함수
+        _checkForeignKeyRelationship: async function(oModel,  sEntitySetName1, sEntitySetName2) {
+            const oMetadata = oModel.getServiceMetadata(); //모델의 메타데이터를 가져옴
+            if(!oMetadata) {
+                await oModel.metadataLoaded();
+                oMetadata = oModel.getServiceMetadata();
+            }
+            const oEntitySet1 = this._getEntitySetProperties(oMetadata, sEntitySetName1); // 첫 번째 엔티티셋 정보 추출
+            const oEntitySet2 = this._getEntitySetProperties(oMetadata, sEntitySetName2); // 두 번째 엔티티셋 정보 추출
+
+            // 첫 번째 엔티티셋의 모든 속성 이름을 배열로 추출
+            const aEntitySet1Properties = oEntitySet1.properties.map(prop => prop.name);
             
+            // 두 번째 엔티티셋의 모든 속성 이름을 배열로 추출
+            const aEntitySet2Properties = oEntitySet2.properties.map(prop => prop.name);
+
+            // 첫 번째 엔티티셋의 속성 중 두 번째 엔티티셋에 존재하는 속성이 있는지 확인
+            return aEntitySet1Properties.some(prop => aEntitySet2Properties.includes(prop));
+        },
+
+         // 두 EntitySet의 데이터를 읽어와 결합해서 하나의 모델로 만드는 함수
+        loadCombinedData: async function() {
+            const northwindModel =this.aODataModels[0];
+            const btpModel = this.aODataModels[1];
+
             // await northwindModel.metadataLoaded();
             // await btpModel.metadataLoaded();
 
@@ -135,8 +255,17 @@ sap.ui.define([
         },
 
         // CRUD 작업을 위한 공통함수
-        performCrudOperation: async function(action, entityData) {
+        createData: async function(oNewData) {
+            const oMetadata = this.oTable.getBinding('items').getModel().getProperty("/metadata");
 
+
+            // 각각 모델에 데이터 생성
+            oMetadata.forEach((oEntityInfo, index) => {
+                const oModel = this.aODataModels[index];
+                const sEntitySetName = oEntityInfo.uri.split("/").pop();
+
+                const oNewEntityData = {};
+            });
         },
 
         initDefaultInfo: function() {
