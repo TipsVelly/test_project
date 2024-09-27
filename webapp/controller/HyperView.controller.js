@@ -30,18 +30,18 @@ sap.ui.define([
             });
             this.getView().setModel(oCombinedModel, "combinedModel");
 
-            this.aOModelOptions = [];
-
-            this.aOModelOptions[0] = {
-                oModel: this.getOwnerComponent().getModel("northwindModel"),
-                sEntitySet: "Customers",
-                joinProperty: null,
-            };
-            this.aOModelOptions[1] = {
-                oModel: this.getOwnerComponent().getModel("btpModel"),
-                sEntitySet: "BTPPoValidation",
-                joinProperty: null,
-            };
+            this.aOModelOptions = [
+                {
+                    oModel: this.getOwnerComponent().getModel("northwindModel"),
+                    sEntitySet: "Customers",
+                    joinProperty: null,
+                },
+                {
+                    oModel: this.getOwnerComponent().getModel("btpModel"),
+                    sEntitySet: "BTPPoValidation",
+                    joinProperty: null,
+                }
+            ];
         },
         
         loadCombinedData: async function(...aOptions) {
