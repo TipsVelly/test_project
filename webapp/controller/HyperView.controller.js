@@ -35,12 +35,12 @@ sap.ui.define([
             this.aOModelOptions[0] = {
                 oModel: this.getOwnerComponent().getModel("northwindModel"),
                 sEntitySet: "Customers",
-                joinProperty: "Name1",
+                joinProperty: null,
             };
             this.aOModelOptions[1] = {
                 oModel: this.getOwnerComponent().getModel("btpModel"),
                 sEntitySet: "BTPPoValidation",
-                joinProperty: "Name2",
+                joinProperty: null,
             };
         },
         
