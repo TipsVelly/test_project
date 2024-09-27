@@ -283,6 +283,7 @@ sap.ui.define([
                 MessageBox.error(`${iErrorCount}개의 데이터 삭제에 실패했습니다.`);
             }
         },
+
         // 주어진 모델의 메타데이터를 비동기적으로 가져오는 함수 (메타데이터가 없을 경우 로드)  
         _getMetadataAsync: async function(oModel) {
             
@@ -301,47 +302,198 @@ sap.ui.define([
             return oModel.getServiceMetadata();
         },
         
-         // EntitySet의 속성 정보 객체배열을 반환하는 함수
-         _getEntitySetProperties: function(oMetadata, sEntitySetName) {
-            if(!oMetadata) 
-                throw new Error("metadata not bean");
-            if(typeof oMetadata !== "object")
-                throw new Error("metadata parameter type don't matched object type");
-
-            // 엔티티셋 정보 찾기
+        // 주어진 엔티티셋 이름에 대한 엔티티셋 정보를 반환하는 함수
+        _getEntitySetProperties: function(oMetadata, sEntitySetName) {
+            // 엔티티셋 정보를 메타데이터에서 찾음
             const oEntitySet = oMetadata.dataServices.schema
-                .flatMap(oSchema => oSchema.entityContainer || []) 
-                .flatMap(oContainer => oContainer.entitySet || [])
-                .find(oEntitySet => oEntitySet.name === sEntitySetName);
+                .flatMap(schema => schema.entityContainer || []) // 모든 엔티티 컨테이너 추출
+                .flatMap(container => container.entitySet || []) // 모든 엔티티셋 추출
+                .find(entitySet => entitySet.name === sEntitySetName); // 주어진 이름의 엔티티셋 찾기
 
             if (!oEntitySet) {
                 throw new Error(`EntitySet '${sEntitySetName}' not found.`);
             }
 
-            // 엔티티 타입 정보 찾기
-            const sEntityTypeName = oEntitySet.entityType;
+            // 엔티티 타입 이름과 속성 정보 찾기
+            const sEntityTypeName = oEntitySet.entityType.split('.').pop(); // 간단한 엔티티 타입 이름 추출
+
+            // 엔티티 타입 정보 추출
             const oEntityType = oMetadata.dataServices.schema
-                .flatMap(oSchema => oSchema.entityType)
-                .find(entityType => entityType.name === sEntityTypeName.split('.').pop());
+                .flatMap(schema => schema.entityType || []) // 모든 엔티티 타입 추출
+                .find(entityType => entityType.name === sEntityTypeName); // 주어진 엔티티 타입 이름으로 찾기
+
+            if (!oEntityType) {
+                throw new Error(`EntityType '${sEntityTypeName}' not found.`);
+            }
+
+            // 키 속성 목록 추출
+            const aKeyProperties = oEntityType.key.propertyRef.map(prop => prop.name);
+
+            // 속성 정보 구성 (각 속성에 isKey 속성 추가)
+            const aProperties = oEntityType.property.map(prop => ({
+                ...prop,                                    // 기존 prop 객체 복사
+                isKey: aKeyProperties.includes(prop.name)   // 키 속성 여부 추가
+            }));
+
+            // 엔티티 타입 이름과 속성 정보 반환
+            return {
+                entityTypeName: oEntityType.name, // 엔티티 타입 이름
+                properties: aProperties || [] // 속성 정보 배열 (기본적으로 빈 배열 반환)
+            };
+        },
+        
+        // 외래키 관계 여부를 체크하는 함수(단방향 체크, 명확한 관계 확인)
+        _checkForeignKeyRelationship: async function(oModel,  sEntitySetName1, sEntitySetName2) {
+            // 메타데이터 로드 확인 및 로드 대기
+            const oMetadata = await this._getMetadataAsync(oModel);
+
+            // 첫 번째 엔티티셋의 엔티티 타입 이름을 추출
+            const oEntitySet1 = this._getEntitySetProperties(oMetadata, sEntitySetName1);
+            const sEntityTypeName1 = oEntitySet1.entityTypeName;
+
+            // 두 번째 엔티티셋의 엔티티 타입 이름을 추출
+            const oEntitySet2 = this._getEntitySetProperties(oMetadata, sEntitySetName2);
+            const sEntityTypeName2 = oEntitySet2.entityTypeName;
+
+            // 첫 번째 엔티티 타입의 모든 네비게이션 속성 추출
+            const aNavigationProperties1 = this._getNavigationProperties(oMetadata, sEntityTypeName1);
+
+            // 두 번째 엔티티 타입이 첫 번째 엔티티 타입의 네비게이션 속성에 존재하는지 확인
+            const bIsRelatedFrom1To2 = aNavigationProperties1.some(navProp => navProp.toEntityType === sEntityTypeName2);
+
+            // 첫 번째 엔티티셋이 두 번째 엔티티셋과 연관관계가 있는 경우
+            return bIsRelatedFrom1To2;
+        },
+
+        // 주어진 엔티티 타입의 모든 네비게이션 속성을 추출하는 함수
+        _getNavigationProperties: function(oMetadata, sEntityTypeName) {
+            // 엔티티 타입을 메타데이터에서 검색
+            const oEntityType = oMetadata.dataServices.schema
+                .flatMap(oSchema => oSchema.entityType) // 모든 엔티티 타입 추출
+                .find(entityType => entityType.name === sEntityTypeName); // 주어진 이름의 엔티티 타입 찾기
 
             if(!oEntityType) {
                 throw new Error(`EntityType '${sEntityTypeName}' not found.`);
             }
-           
-            // 키 속성 목록
-            const aKeyProperties = oEntityType.key.propertyRef.map(prop => prop.name);
 
-            // 속성 정보 구성
-            const aProperties = oEntityType.property.map(prop => ({
-                name: prop.name,
-                type: prop.type,
-                isKey: aKeyProperties.includes(prop.name)
+            // 네비게이션 속성 목록 반환
+            return oEntityType.navigationProperty.map(navProp => ({
+                name: navProp.name,                         // 네이비게이션 속성 이름
+                relationship: navProp.relationship,         // 관계 이름
+                fromRole: navProp.fromRole,                 // 시작 역할
+                toRole: navProp.toRole,                     // 끝 역할
+                toEntityType: navProp.type.split('.').pop() // 대상 엔티티 타입 이름
             }));
+        },
+        
+        // 두 데이터셋을 강제 조인하는 함수
+        _joinData: function(aMainData, aJoinData, sMainProperty, sJoinProperty) {
+            // 강제 조인된 결과를 저장할 배열
+            const aJoinedData = [];
             
-            return {
-                entityTypeName: oEntityType.name,
-                properties: aProperties
-            };
+            // 메인 데이터셋을 순회하면서 조인할 데이터셋 비교
+            aMainData.forEach(mainItem => {
+              //메인 데이터셋의 joinProperty 값 추출
+              const mainKey = mainItem[sMainProperty];
+  
+              // 조인할 데이터셋에서 joinProperty 값이 동일한 항목 찾기
+              const matchedJoinItem = aJoinData.find(joinItem => joinItem[sJoinProperty] === mainKey);
+              aJoinData.push({
+                  ...mainItem,                        // 메인 항목
+                  ...matchedJoinItem || {}            // 일치하는 항목이 있으면 결합, 없으면 빈 객체 결합
+              });
+            });
+            
+            return aJoinData;
+        },
+
+        // 결합된 데이터를 모델에 바인딩하는 함수
+        _bindCombinedModel: function(oCombinedModel, oData) {
+            oCombinedModel ??= this.getView().getModel("combinedModel");
+
+            // oData는 { data: [] } 형태여야 함
+            if (!oData || !Array.isArray(oData.data)) {
+                console.error("Invalid data format. Expected { data: [] } format.");
+                return;
+            }
+
+            // combinedModel에 데이터 설정
+            oCombinedModel.setData(oData);
+            console.log("Combined data set to model:", oData);
+        },
+
+        // 두 데이터셋을 결합하는 함수
+        _getJoinedData: function(oData1, oData2, joinCondition) {
+            // joinProperty가 둘 중 하나라도 null인지 확인
+            if (!joinCondition.mainJoinProperty || !joinCondition.joinJoinProperty) {
+                console.log("One or both join properties are null, combining data by index.");
+        
+                // 강제 조인 없이 인덱스 순으로 데이터 결합
+                return oData1.results.map((item1, index) => ({
+                    ...item1,
+                    ...(oData2.results[index] || {}) // 인덱스에 해당하는 조인 데이터 추가
+                }));
+            } else {
+                console.log("Both join properties are valid, performing join.");
+        
+                // 두 joinProperty가 모두 유효할 경우 강제 조인
+                return this._joinData(
+                    oData1.results,
+                    oData2.results,
+                    joinCondition.mainJoinProperty,
+                    joinCondition.joinJoinProperty
+                );
+            }
+        },
+
+        // 서로 다른 모델 간 강제 조인 수행
+        _performForcedJoinBetweenModels: async function(joinCondition) {
+            try {
+                // 메인 모델의 데이터를 읽어옴
+                const oData1 = await this._readODataAsync(joinCondition.mainModel, joinCondition.mainEntitySet, null);
+
+                // 조인할 모델의 데이터를 읽어옴
+                const oData2 = await this._readODataAsync(joinCondition.joinModel, joinCondition.joinEntitySet, null);
+
+                // _getJoinedData 함수 호출하여 결합된 데이터 반환
+                const oJoinedData = this._getJoinedData(oData1, oData2, joinCondition);
+
+                // 결합된 데이터 바인딩
+                this._bindCombinedModel(null, {data: oJoinedData});
+            } catch (oError) {
+                console.error(`Error performing forced join between different models:`, oError);
+            }
+        },
+
+        // OData 데이터를 비동기적으로 읽어오는 함수 (Promise 반환)
+        _readODataAsync: function(oModel, sEntitySetName, urlParameters = {}) {
+            return new Promise((resolve, reject) => {
+                oModel.read(`/${sEntitySetName}`, {
+                    urlParameters,      // 동적으로 설정된 URL 파라미터 사용
+                    success: resolve,   // 성공 시 OData 결과를 resolve로 전달
+                    error: reject       // 실패 시 reject로 오류 전달
+                });
+            });
+        },
+
+        // 강제 조인 조건을 받아 같은 모델 내의 데이터를 결합하는 함수
+        _performForcedJoin: async function(joinCondition) {
+            try {
+                // 메인 모델의 데이터를 읽어옴
+                const oData1 = await this._readODataAsync(joinCondition.mainModel, joinCondition.mainEntitySet, null);
+
+                // 조인할 모델의 데이터를 읽어옴 (같은 모델 사용)
+                const oData2 = await this._readODataAsync(joinCondition.mainModel, joinCondition.joinEntitySet, null);
+
+                 // _getJoinedData 함수 호출하여 결합된 데이터 반환
+                const oJoinedData = this._getJoinedData(oData1, oData2, joinCondition);
+
+                // 결합된 데이터 바인딩
+                this._bindCombinedModel(null, {data: oJoinedData});
+
+            } catch (oError) {
+                console.error(`Error performing forced join within the same model:`, oError);
+            }
         },
     });
 

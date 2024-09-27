@@ -19,8 +19,8 @@ sap.ui.define([
             // ROUTER URL MATCH EVENT 함수
             this.search_model.setData({});
             // this.onSearch();
-            // this.loadCombinedData();
-            this.loadCombinedDataV2(...this.aOModelOptions);
+            this.loadCombinedData(...this.aOModelOptions);
+            // this._checkForeignKeyRelationship(this.getOwnerComponent().getModel("btpModel"), "BTPPoValidation", "BtpFinalProduction");
         },
         initDefaultInfo2: function() {
             // JSON Model 생성
@@ -43,174 +43,94 @@ sap.ui.define([
                 joinProperty: "Name2",
             };
         },
-
         
-        loadCombinedDataV2: async function(...aOptions) {
+        loadCombinedData: async function(...aOptions) {
             try {
                 // 각 모델의 Service URL을 추출하여 배열에 저장
-                const aServiceUrls = aOptions.map(({oModel}) => oModel.sServiceUrl);
+                const aServiceUrls = aOptions.map(({ oModel }) => oModel.sServiceUrl);
                 // 첫 번째 모델의 Service URL을 메인 URL로 설정
                 const sMainServiceUrl = aServiceUrls[0];
-
+        
                 // 확장할 엔티티셋 이름들을 저장할 배열
-                const aExpandEntities = [];
-
+                let aExpandEntities = [];
+        
                 // 강제 조인 조건을 저장할 배열
-                const aJoinConditions = [];
-
-                // 첫 번째 모델 옵션을 메인옵션으로 설정
+                let aJoinConditions = [];
+        
+                // 첫 번째 모델 옵션을 메인 옵션으로 설정
                 const oMainOption = aOptions[0];
-
+        
                 // 메인 서비스 URL과 나머지 서비스 URL 비교
                 for (let i = 1; i < aServiceUrls.length; i++) {
                     const sServiceUrl = aServiceUrls[i];
                     const oCurrentOption = aOptions[i];
-
-                    if(sServiceUrl === sMainServiceUrl) {
-                        // 메인 서비스 URL과 같을 경우, 외래키 여부 체크
-                        const isForeignKeyRelated = this._checkForeignKeyRelationship(
-                            oMainOption.oModel,         // 메인 모델
-                            oMainOption.sEntitySet,     // 메인 엔티티셋 이름
-                            oCurrentOption.sEntitySet   // 현재 비교하는 엔티티셋 이름
+        
+                    if (sServiceUrl === sMainServiceUrl) {
+                        // 같은 서비스 URL을 사용하는 경우 외래키 여부 체크
+                        const isForeignKeyRelated = await this._checkForeignKeyRelationship(
+                            oMainOption.oModel,       // 메인 모델
+                            oMainOption.sEntitySet,   // 메인 엔티티셋 이름
+                            oCurrentOption.sEntitySet // 현재 비교하는 엔티티셋 이름
                         );
-
-                        if(isForeignKeyRelated) {
+        
+                        if (isForeignKeyRelated) {
                             // 외래키 관계가 있을 경우, 확장할 엔티티셋 이름 추가
                             aExpandEntities.push(oCurrentOption.sEntitySet);
                             console.log(`Foreign key relation found. Adding ${oCurrentOption.sEntitySet} to expand list.`);
                         } else {
-                            // 외래키 관계가 없으면 강제 조언 조건으로 'joinProperty'를 사용
+                            // 같은 모델이지만 외래키 관계가 없을 때 강제 조인 조건 추가
                             aJoinConditions.push({
-                                mainEntitySet: oMainOption.sEntitySet, // 메인 엔티티셋 이름
+                                mainEntitySet: oMainOption.sEntitySet,       // 메인 엔티티셋 이름
                                 joinEntitySet: oCurrentOption.sEntitySet,    // 조인할 엔티티셋 이름
                                 mainJoinProperty: oMainOption.joinProperty,  // 메인 조인 프로퍼티
-                                joinJoinProperty: oCurrentOption.joinProperty // 조인할 조인 프로퍼티
+                                joinJoinProperty: oCurrentOption.joinProperty, // 조인할 조인 프로퍼티
+                                mainModel: oMainOption.oModel,               // 메인 모델 추가
+                                joinModel: oCurrentOption.oModel             // 조인할 모델 추가
                             });
                         }
                     } else {
-                        // 메인 서비스 URL과 다를 경우에도 강제 조인 조건으로 `joinProperty` 사용
+                        // 다른 서비스 URL을 사용하는 경우 강제 조인 조건 추가
+                        // 서로 다른 모델 간 강제 조인을 수행하기 위해 조인 조건 설정
                         aJoinConditions.push({
                             mainEntitySet: oMainOption.sEntitySet,       // 메인 엔티티셋 이름
                             joinEntitySet: oCurrentOption.sEntitySet,    // 조인할 엔티티셋 이름
                             mainJoinProperty: oMainOption.joinProperty,  // 메인 조인 프로퍼티
-                            joinJoinProperty: oCurrentOption.joinProperty // 조인할 조인 프로퍼티
+                            joinJoinProperty: oCurrentOption.joinProperty, // 조인할 조인 프로퍼티
+                            mainModel: oMainOption.oModel,               // 메인 모델 추가
+                            joinModel: oCurrentOption.oModel             // 조인할 모델 추가
                         });
-                    }
-
-                    if(aExpandEntities.length > 0) {
-                        // $expand를 위한 쿼리 문자열을 생성
-                        const sExpandQuery = aExpandEntities.join(',');
-
-                        console.log(`Fetching data with $expand: ${sExpandQuery}`);
-
-                        // 메인 모델에서 $expand를 사용하여 데이터 읽기
-                        oMainOption.oModel.read(`/${oMainOption.sEntitySet}`, {
-                            urlParameters: {
-                                "$expand": sExpandQuery // 동적으로 생성된 $expand 쿼리 설정
-                            },
-                            success: (oData) => {
-                                // 데이터 결합 후 모델에 바인딩
-                                this._bindCombinedModel(oData);
-                            },
-                            error: (oError) => {
-                                console.error("Error fetching data with $expand:", oError);
-                            }
-                        });
-                    }
-
-                    if (aJoinConditions.length > 0) {
-                        // 강제 조인 조건에 따라 데이터를 가져와 조인
-                        for (const condition of aJoinConditions) {
-                            this._performForcedJoin(oMainOption, condition);
-                        }
+                        console.log(`Adding join condition between different models: ${oMainOption.sEntitySet} and ${oCurrentOption.sEntitySet}.`);
                     }
                 }
-
-            } catch (error) {
-                onsole.error("Error loading combined data:", error);
-            }
-        },
-
-        // 외래키 관계 여부를 체크하는 함수
-        _checkForeignKeyRelationship: async function(oModel,  sEntitySetName1, sEntitySetName2) {
-            // 메타데이터 로드 확인 및 로드 대기
-            const oMetadata = await this._getMetadataAsync(oModel);
-
-            // 첫 번째 엔티티셋의 엔티티 타입 이름을 추출
-        },
-
-         // 두 EntitySet의 데이터를 읽어와 결합해서 하나의 모델로 만드는 함수
-        loadCombinedData: async function() {
-            const northwindModel =this.aODataModels[0];
-            const btpModel = this.aODataModels[1];
-
-            // await northwindModel.metadataLoaded();
-            // await btpModel.metadataLoaded();
-
-            console.log("metadata loaded.");
-            
-            // 첫 번째 EntitySet 데이터 읽기
-            northwindModel.read(`/${this.odata_01_name}`, {
-                success: (oData1) => {
+        
+                if (aExpandEntities.length > 0) {
+                    // $expand를 위한 쿼리 문자열을 생성
+                    const sExpandQuery = aExpandEntities.join(',');
+        
+                    console.log(`Fetching data with $expand: ${sExpandQuery}`);
                     
-
-                    // 두 번째 EntitySet 데이터 읽기
-                    btpModel.read(`/${this.odata_02_name}`, {
-                        success: (oData2) => {
-                            // 두 데이터 통합
-                            // 첫 번째 odata EntitySet metadata 읽기
-                            const oMetadata1 = this.odataModel1.getServiceMetadata();
-
-                            // 두 번째 odata entitySet metadata 읽기
-                            const oMetadata2 = this.odataModel2.getServiceMetadata();
-
-                            const oCombinedData = oData1.results.map((item1, index) => {
-                                // oData2의 인덱스에 해당하는 아이템이 있는지 확인
-                                const item2 = oData2.results[index] || {}; // 존재하지 않으면 빈 객체로 반환
-
-                                // 하나의 객체로 통합
-                                return {
-                                    id: index,
-                                    ...item1,
-                                    ...item2,
-                                    __metadata:[]
-                                }
-                            });
-                            const oNewModelData = {
-                                metadata: [
-                                    {   
-                                        uri: oData1.results[0].__metadata.uri.split("(")[0],
-                                        entityType: this._getEntitySetProperties(oMetadata1, this.odata_01_name)
-                                    },
-                                    {
-                                        uri: oData2.results[0].__metadata.uri.split("(")[0],
-                                        entityType: this._getEntitySetProperties(oMetadata2, this.odata_02_name)
-                                    }
-                                ],
-                                data: oCombinedData
-                            }
-                            
-                            // JSON Model에 결합된 데이터 설정
-                            const oCombinedModel = this.oTable.getBinding('items').getModel();
-                            oCombinedModel.setData(oNewModelData);
+                    const oData = await this._readODataAsync(oMainOption, oMainOption.sEntitySet, {"$expand": sExpandQuery});
+                    this._bindCombinedModel(null, { data: oData.results });
+                } 
+                else if (aJoinConditions.length > 0) {
+                    // 강제 조인 조건에 따라 데이터를 가져와 조인
+                    for (const condition of aJoinConditions) {
+                        // 다른 모델 간의 조인 조건이 있는 경우 이를 처리
+                        if (condition.mainModel && condition.joinModel) {
+                            await this._performForcedJoinBetweenModels(condition);
+                        } else {
+                            // 동일 모델 내 조인 조건인 경우
+                            await this._performForcedJoin(condition);
                         }
-                    });
+                    }
                 }
-            });
-        },
-
-        // CRUD 작업을 위한 공통함수
-        createData: async function(oNewData) {
-            const oMetadata = this.oTable.getBinding('items').getModel().getProperty("/metadata");
-
-
-            // 각각 모델에 데이터 생성
-            oMetadata.forEach((oEntityInfo, index) => {
-                const oModel = this.aODataModels[index];
-                const sEntitySetName = oEntityInfo.uri.split("/").pop();
-
-                const oNewEntityData = {};
-            });
+                else {
+                    throw Error("해당하는 조인 조건을 찾을 수가 없습니다.");
+                }
+        
+            } catch (error) {
+                console.error("Error loading combined data:", error);
+            }
         },
 
         initDefaultInfo: function() {
