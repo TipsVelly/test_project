@@ -428,9 +428,9 @@ sap.ui.define([
         },
 
         // 두 데이터셋을 결합하는 함수
-        _getJoinedData: function(oData1, oData2, joinCondition) {
+        _getJoinedData: function(oData1, joinProperty1, oData2, joinProperty2) {
             // joinProperty가 둘 중 하나라도 null인지 확인
-            if (!joinCondition.mainJoinProperty || !joinCondition.joinJoinProperty) {
+            if (!joinProperty1 || !joinProperty2) {
                 console.log("One or both join properties are null, combining data by index.");
         
                 // 강제 조인 없이 인덱스 순으로 데이터 결합
@@ -445,28 +445,9 @@ sap.ui.define([
                 return this._joinData(
                     oData1.results,
                     oData2.results,
-                    joinCondition.mainJoinProperty,
-                    joinCondition.joinJoinProperty
+                    joinProperty1,
+                    joinProperty2
                 );
-            }
-        },
-
-        // 서로 다른 모델 간 강제 조인 수행
-        _performForcedJoinBetweenModels: async function(joinCondition) {
-            try {
-                // 메인 모델의 데이터를 읽어옴
-                const oData1 = await this._readODataAsync(joinCondition.mainModel, joinCondition.mainEntitySet, null);
-
-                // 조인할 모델의 데이터를 읽어옴
-                const oData2 = await this._readODataAsync(joinCondition.joinModel, joinCondition.joinEntitySet, null);
-
-                // _getJoinedData 함수 호출하여 결합된 데이터 반환
-                const oJoinedData = this._getJoinedData(oData1, oData2, joinCondition);
-
-                // 결합된 데이터 바인딩
-                this._bindCombinedModel(null, {data: oJoinedData});
-            } catch (oError) {
-                console.error(`Error performing forced join between different models:`, oError);
             }
         },
 
@@ -482,114 +463,218 @@ sap.ui.define([
         },
 
         // 강제 조인 조건을 받아 같은 모델 내의 데이터를 결합하는 함수
-        _performForcedJoin: async function(joinCondition) {
+        _performForcedJoin: async function(
+            {oModel: oMainModel, sEntitySet: sMainEntitySet, sJoinProperty: sMainJoinProperty}, 
+            {oModel: oSubModel, sEntitySet: sSubEntitySet, sJoinProperty: sSubJoinProperty}) 
+            {
             try {
                 // 메인 모델의 데이터를 읽어옴
-                const oData1 = await this._readODataAsync(joinCondition.mainModel, joinCondition.mainEntitySet, null);
+                const oData1 = await this._readODataAsync(oMainModel, sMainEntitySet, null);
 
                 // 조인할 모델의 데이터를 읽어옴 (같은 모델 사용)
-                const oData2 = await this._readODataAsync(joinCondition.mainModel, joinCondition.joinEntitySet, null);
+                const oData2 = await this._readODataAsync(oSubModel, sSubEntitySet, null);
 
                  // _getJoinedData 함수 호출하여 결합된 데이터 반환
-                const oJoinedData = this._getJoinedData(oData1, oData2, joinCondition);
+                const aJoinData = this._getJoinedData(oData1, sMainJoinProperty, oData2, sSubJoinProperty);
 
-                // 결합된 데이터 바인딩
-                this._bindCombinedModel(null, {data: oJoinedData});
+                return aJoinData;
 
             } catch (oError) {
                 console.error(`Error performing forced join within the same model:`, oError);
+                throw new Error("Error iccurs!", oError);
+            }
+        },
+        loadCombinedData: async function(...aOptions) {
+            try {
+                const oMainOption = aOptions[0]; // 메인 옵션
+                const aExpandEntities = [];
+                const aJoinConditions = [];
+                let aData = []; // 누적 데이터 저장할 배열
+                let aMetadata = []; // 누적 메타데이터 저장할 배열
+        
+                // 메인 엔티티의 메타데이터 및 컬럼 정보
+                const oMainEntityMetadata = await this._getMetadataAsync(oMainOption.oModel);
+                const OMainEntitySetProperties = this._getEntitySetProperties(oMainEntityMetadata, oMainOption.sEntitySet);
+                
+                // 메인 데이터에 대한 메타데이터 생성
+                aMetadata = [...this._createColumnMetadata(OMainEntitySetProperties, oMainOption.sEntitySet, oMainOption.oModel)];
+        
+                // 1. 메인 데이터 가져오기
+                const oMainData = await this._readODataAsync(oMainOption.oModel, oMainOption.sEntitySet, null);
+                aData = oMainData.results; // 메인 데이터 저장
+        
+                // 2. 모든 서브 OData와 메인 OData 비교
+                for (let i = 1; i < aOptions.length; i++) {
+                    const oCurrentOption = aOptions[i];
+        
+                    // 외래키 여부 확인 ($expand 가능 여부 확인)
+                    const isForeignKeyRelated = oCurrentOption.oModel.sServiceUrl === oMainOption.oModel.sServiceUrl &&
+                        await this._checkForeignKeyRelationship(oMainOption.oModel, oMainOption.sEntitySet, oCurrentOption.sEntitySet);
+                    
+                    if (isForeignKeyRelated) {
+                        // 외래키가 있으면 $expand 대상에 추가
+                        aExpandEntities.push(oCurrentOption.sEntitySet);
+                    } else {
+                        // 외래키가 없으면 강제 조인 설정
+                        aJoinConditions.push(oCurrentOption);
+                    }
+                }
+        
+                // 3. $expand로 데이터를 가져오기
+                if (aExpandEntities.length > 0) {
+                    const sExpandQuery = aExpandEntities.join(',');
+                    const oExpandedData = await this._readODataAsync(oMainOption.oModel, oMainOption.sEntitySet, { "$expand": sExpandQuery });
+        
+                    // $expand된 데이터와 메타데이터를 병합 및 업데이트
+                    aExpandEntities.forEach(sEntitySet => {
+                        const oExpandEntityProperties = this._getEntitySetProperties(oMainEntityMetadata, sEntitySet);
+        
+                        // _mergeAndAddExpandData를 통해 메타데이터와 데이터를 동시에 처리
+                        const mergedExpandResult = this._mergeAndAddExpandData(aData, oExpandedData.results, aMetadata, oExpandEntityProperties, sEntitySet, oMainOption.oModel);
+        
+                        // 메타데이터와 데이터를 업데이트
+                        aData = mergedExpandResult.data;
+                        aMetadata = mergedExpandResult.metadata;
+                    });
+                }
+                
+                // 4. 강제 조인 처리
+                if (aJoinConditions.length > 0) {
+                    for (const oJoinCondition of aJoinConditions) {
+                        // 각 서브 엔티티셋의 데이터를 강제 조인
+                        const aJoinedData = await this._performForcedJoin(
+                            {
+                                oModel: oMainOption.oModel,
+                                sEntitySet: oMainOption.sEntitySet,
+                                sJoinProperty: oMainOption.sJoinProperty
+                            },
+                            {
+                                oModel: oJoinCondition.oModel,
+                                sEntitySet: oJoinCondition.sEntitySet,
+                                sJoinProperty: oJoinCondition.sJoinProperty
+                            }
+                        );
+                        
+                        const oSubMetadata = await this._getMetadataAsync(oJoinCondition.oModel);
+                        const oSubEntityProperties = this._getEntitySetProperties(oSubMetadata, oJoinCondition.sEntitySet);
+
+                        // 서브 데이터의 필드를 메인 데이터의 각 행에 열로 추가
+                        const mergedDataResult = this._addColumnsToMainData(aData, aJoinedData, oMainOption.sJoinProperty, oJoinCondition.sJoinProperty, aMetadata, oSubEntityProperties, oJoinCondition.sEntitySet, oJoinCondition.oModel);
+                        
+                        // 메타데이터와 데이터를 업데이트
+                        aData = mergedDataResult.data;
+                        aMetadata = mergedDataResult.metadata;
+                    }
+                }
+        
+                // 5. 최종적으로 메타데이터와 데이터를 모델에 바인딩
+                this._bindCombinedModel(null, { metadata: aMetadata, data: aData });
+        
+            } catch (oError) {
+                console.error("Error loading combined data:", oError);
             }
         },
 
-        // 결합된 테이블 읽기 함수
-        loadCombinedData: async function(...aOptions) {
-            try {
-                // 각 모델의 Service URL을 추출하여 배열에 저장
-                const aServiceUrls = aOptions.map(({ oModel }) => oModel.sServiceUrl);
-                // 첫 번째 모델의 Service URL을 메인 URL로 설정
-                const sMainServiceUrl = aServiceUrls[0];
-        
-                // 확장할 엔티티셋 이름들을 저장할 배열
-                let aExpandEntities = [];
-        
-                // 강제 조인 조건을 저장할 배열
-                let aJoinConditions = [];
-        
-                // 첫 번째 모델 옵션을 메인 옵션으로 설정
-                const oMainOption = aOptions[0];
-        
-                // 메인 서비스 URL과 나머지 서비스 URL 비교
-                for (let i = 1; i < aServiceUrls.length; i++) {
-                    const sServiceUrl = aServiceUrls[i];
-                    const oCurrentOption = aOptions[i];
-        
-                    if (sServiceUrl === sMainServiceUrl) {
-                        // 같은 서비스 URL을 사용하는 경우 외래키 여부 체크
-                        const isForeignKeyRelated = await this._checkForeignKeyRelationship(
-                            oMainOption.oModel,       // 메인 모델
-                            oMainOption.sEntitySet,   // 메인 엔티티셋 이름
-                            oCurrentOption.sEntitySet // 현재 비교하는 엔티티셋 이름
-                        );
-        
-                        if (isForeignKeyRelated) {
-                            // 외래키 관계가 있을 경우, 확장할 엔티티셋 이름 추가
-                            aExpandEntities.push(oCurrentOption.sEntitySet);
-                            console.log(`Foreign key relation found. Adding ${oCurrentOption.sEntitySet} to expand list.`);
-                        } else {
-                            // 같은 모델이지만 외래키 관계가 없을 때 강제 조인 조건 추가
-                            aJoinConditions.push({
-                                mainEntitySet: oMainOption.sEntitySet,       // 메인 엔티티셋 이름
-                                joinEntitySet: oCurrentOption.sEntitySet,    // 조인할 엔티티셋 이름
-                                mainJoinProperty: oMainOption.joinProperty,  // 메인 조인 프로퍼티
-                                joinJoinProperty: oCurrentOption.joinProperty, // 조인할 조인 프로퍼티
-                                mainModel: oMainOption.oModel,               // 메인 모델 추가
-                                joinModel: oCurrentOption.oModel             // 조인할 모델 추가
-                            });
-                        }
-                    } else {
-                        // 다른 서비스 URL을 사용하는 경우 강제 조인 조건 추가
-                        // 서로 다른 모델 간 강제 조인을 수행하기 위해 조인 조건 설정
-                        aJoinConditions.push({
-                            mainEntitySet: oMainOption.sEntitySet,       // 메인 엔티티셋 이름
-                            joinEntitySet: oCurrentOption.sEntitySet,    // 조인할 엔티티셋 이름
-                            mainJoinProperty: oMainOption.joinProperty,  // 메인 조인 프로퍼티
-                            joinJoinProperty: oCurrentOption.joinProperty, // 조인할 조인 프로퍼티
-                            mainModel: oMainOption.oModel,               // 메인 모델 추가
-                            joinModel: oCurrentOption.oModel             // 조인할 모델 추가
-                        });
-                        console.log(`Adding join condition between different models: ${oMainOption.sEntitySet} and ${oCurrentOption.sEntitySet}.`);
-                    }
-                }
-        
-                if (aExpandEntities.length > 0) {
-                    // $expand를 위한 쿼리 문자열을 생성
-                    const sExpandQuery = aExpandEntities.join(',');
-        
-                    console.log(`Fetching data with $expand: ${sExpandQuery}`);
-                    
-                    const oData = await this._readODataAsync(oMainOption, oMainOption.sEntitySet, {"$expand": sExpandQuery});
-                    this._bindCombinedModel(null, { data: oData.results });
-                } 
-                else if (aJoinConditions.length > 0) {
-                    // 강제 조인 조건에 따라 데이터를 가져와 조인
-                    for (const condition of aJoinConditions) {
-                        // 다른 모델 간의 조인 조건이 있는 경우 이를 처리
-                        if (condition.mainModel && condition.joinModel) {
-                            await this._performForcedJoinBetweenModels(condition);
-                        } else {
-                            // 동일 모델 내 조인 조건인 경우
-                            await this._performForcedJoin(condition);
-                        }
-                    }
-                }
-                else {
-                    throw Error("해당하는 조인 조건을 찾을 수가 없습니다.");
-                }
-        
-            } catch (error) {
-                console.error("Error loading combined data:", error);
-            }
+        _createColumnMetadata: function(oEntitySet, sEntitySetName, oModel) {
+            // oEntitySet: 엔티티셋의 메타데이터
+            // sEntitySetName: 엔티티셋 이름 (출처 정보)
+
+            return oEntitySet.properties.map(property => ({
+                columnName: property.name,                      // 컬럼 이름 (프로퍼티 이름)
+                isKey: property.isKey || false,                 // 키값 여부 (키 값일 경우, true)
+                entitySet: sEntitySetName,                      // 컬럼이 속한 엔티티셋 이름 (출처 정보)
+                oModel: oModel
+            }));
         },
+
+        _mergeAndAddExpandData: function(aMainData, aExpandedData, aMetadata, oExpandedEntityProperties, sEntitySetName, oModel) {
+            // aMainData: 메인 데이터 배열
+            // aExpandedData: 확장된 데이터 배열
+            // aMetadata: 기존 메타데이터 배열
+            // oExpandedEntityMetadata: 확장된 엔티티의 메타데이터
+            // sEntitySetName: 확장된 엔티티셋 이름
+            // oModel: 확장된 엔티티셋의 모델
+        
+            // 1. 확장된 엔티티의 메타데이터 생성 및 추가
+            const expandedMetadata = this._createColumnMetadata(oExpandedEntityProperties, sEntitySetName, oModel);
+        
+            // 기존 메타데이터에 확장된 엔티티셋의 메타데이터를 추가 (중복 방지)
+            expandedMetadata.forEach(meta => {
+                if (!aMetadata.some(m => m.columnName === meta.columnName)) {
+                    aMetadata.push(meta);
+                }
+            });
+        
+            // 2. 메인 데이터와 확장 데이터를 병합
+            const aUpdatedData = aMainData.map(mainRow => {
+                // 확장된 데이터와 메인 데이터를 조인하는 로직 (기본적으로 확장된 데이터는 중첩 구조)
+                const expandedRow = aExpandedData.find(expandRow => expandRow.ID === mainRow.ID); // 조인 조건은 상황에 맞게 설정
+        
+                if (expandedRow) {
+                    Object.keys(expandedRow).forEach(key => {
+                        // 확장된 데이터를 메인 데이터에 병합
+                        if (typeof expandedRow[key] === 'object' && expandedRow[key] !== null) {
+                            mainRow[key] = expandedRow[key]; // 중첩 객체 데이터를 메인 데이터에 추가
+                        }
+                    });
+                }
+        
+                return mainRow;
+            });
+        
+            // 3. 병합된 메타데이터와 데이터를 반환
+            return {
+                metadata: aMetadata,
+                data: aUpdatedData
+            };
+        },
+
+        _addColumnsToMainData: function(aMainData, aJoinedData, sMainJoinProperty, sSubJoinProperty, aMetadata, oSubEntityProperties, sSubEntitySetName, oSubModel) {
+            // aMainData: 메인 데이터 배열
+            // aJoinedData: 서브 데이터 배열
+            // sMainJoinProperty: 메인 데이터와 서브 데이터를 조인할 메인 키 값 (메인 데이터 필드)
+            // sSubJoinProperty: 서브 데이터에서 조인할 필드 (서브 데이터 필드)
+            // aMetadata: 메인 메타데이터 배열
+            // oSubEntityProperties: 서브 데이터의 메타데이터 (서브 엔티티셋의 필드 정보)
+            // sSubEntitySetName: 서브 엔티티셋 이름
+            // oSubModel: 서브 데이터가 속한 모델
+            
+            // 1. 서브 데이터의 메타데이터 생성
+            const newSubMetadata = this._createColumnMetadata(oSubEntityProperties, sSubEntitySetName, oSubModel);
+
+            // 2. 메인 데이터에 서브 데이터를 열로 추가
+            const aUpdatedData = aMainData.map(mainRow => {
+                // 메인 데이터의 조인 키 값 가져오기
+                const mainKey = mainRow[sMainJoinProperty];
+
+                // 서브 데이터에서 조인할 항목 찾기
+                const joinedRow = aJoinedData.find(joinRow => joinRow[sSubJoinProperty] === mainKey);
+
+                // 서브 데이터가 존재하면 해당 열을 메인 데이터에 추가, 없으면 빈 값으로 처리
+                if (joinedRow) {
+                    Object.keys(joinedRow).forEach(key => {
+                        if (!mainRow.hasOwnProperty(key)) {
+                            mainRow[key] = joinedRow[key]; // 서브 데이터의 컬럼을 메인 데이터에 추가
+                        }
+                    });
+                } else {
+                    // 서브 데이터가 없을 경우, 서브 데이터에 있는 필드만큼 빈 값 처리
+                    newSubMetadata.forEach(subMeta => {
+                        if (!mainRow.hasOwnProperty(subMeta.columnName)) {
+                            mainRow[subMeta.columnName] = ""; // 빈 값으로 채움
+                        }
+                    });
+                }
+
+                return mainRow;
+            });             
+
+            // 3. {metadata, data} 형태로 반환
+            return {
+                metadata: [...aMetadata, ...newSubMetadata],
+                data: aUpdatedData
+            }
+        }
     });
 
 });

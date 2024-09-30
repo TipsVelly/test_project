@@ -85,9 +85,9 @@
 				<items>
 					<ColumnListItem vAlign="Middle" type="Navigation" >
 						<cells>
-							<Label text="{combinedModel>BASEMONTH}" />
-							<Label text="{combinedModel>REVISION}" />
+							<Label text="{combinedModel>CATEGORY}" />
 							<Label text="{combinedModel>CMPYID}" />
+							<Label text="{combinedModel>PLNTID}" />
 							<Label text="{combinedModel>CustomerID}" />
 						</cells>
 					</ColumnListItem>
