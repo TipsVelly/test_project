@@ -14,12 +14,12 @@
 					<FlexBox direction="Column" class="paddingL3">
 						<form:SimpleForm id="search_form" editable="true" layout="ColumnLayout" columnsM="2 " columnsL="2" columnsXL="3" labelSpanM="3" labelSpanL="3" labelSpanXL="3">
 							<form:content>
-								<Label text="기준월" />
-								<Input type="Text" value="{hyperView7356SearchModel>/BASEMONTH}" />
-								<Label text="리비전" />
-								<Input type="Text" value="{hyperView7356SearchModel>/REVISION}" />
-								<Label text="아이디" />
-								<Input type="Text" value="{hyperView7356SearchModel>/CMPYID}" />
+								<Label text="ID" />
+								<Input type="Text" value="{hyperView7356SearchModel>/ID}" />
+								<Label text="Name" />
+								<Input type="Text" value="{hyperView7356SearchModel>/Name}" />
+								<Label text="Description" />
+								<Input type="Text" value="{hyperView7356SearchModel>/Description}" />
 
 							</form:content>
 						</form:SimpleForm>
@@ -40,7 +40,7 @@
 			</f:DynamicPageHeader>
 		</f:header>
 		<f:content>
-			<Table id="main_table" growing="true" growingThreshold="20" growingScrollToLoad="true" mode="MultiSelect" itemPress="onListItemPress" items="{combinedModel>/data}" width="auto" class="sapUiMediumMarginBottom">
+			<Table id="main_table" growing="true" growingThreshold="20" growingScrollToLoad="true" mode="MultiSelect" itemPress="onListItemPress" items="{tableModel>/data}" width="auto" class="sapUiMediumMarginBottom">
 				<headerToolbar>
 					<OverflowToolbar>
 						<ToolbarSpacer>
@@ -51,45 +51,9 @@
 						</Button>
 					</OverflowToolbar>
 				</headerToolbar>
-				<columns>
-					<Column width="auto" hAlign="Center">
-						<Label text="기준월">
-							<customData>
-								<core:CustomData key="property" value="BASEMONTH" />
-							</customData>
-						</Label>
-					</Column>
-					<Column width="auto" hAlign="Center">
-						<Label text="리비전">
-							<customData>
-								<core:CustomData key="property" value="REVISION" />
-							</customData>
-						</Label>
-					</Column>
-					<Column width="auto" hAlign="Center">
-						<Label text="아이디">
-							<customData>
-								<core:CustomData key="property" value="CMPYID" />
-							</customData>
-						</Label>
-					</Column>
-					<Column width="auto" hAlign="Center">
-						<Label text="CustomerID">
-							<customData>
-								<core:CustomData key="property" value="CustomerID" />
-							</customData>
-						</Label>
-					</Column>
-
-				</columns>
+				<columns></columns>
 				<items>
 					<ColumnListItem vAlign="Middle" type="Navigation" >
-						<cells>
-							<Label text="{combinedModel>CATEGORY}" />
-							<Label text="{combinedModel>CMPYID}" />
-							<Label text="{combinedModel>PLNTID}" />
-							<Label text="{combinedModel>CustomerID}" />
-						</cells>
 					</ColumnListItem>
 				</items>
 			</Table>
