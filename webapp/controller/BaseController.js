@@ -316,22 +316,29 @@ sap.ui.define([
 
         CombindEntity: class {
             constructor(model, entitySetName, joinKeyPropertyName, role, propertyNames) {
-                this.model = model;
-                this.entitySetName = entitySetName;
-                this.joinKeyPropertyName = joinKeyPropertyName;
-                this.role = role;
-                this.propertyNames = propertyNames;
+                this._model = model;
+                this._entitySetName = entitySetName;
+                this._joinKeyPropertyName = joinKeyPropertyName;
+                this._role = role;
+                this._propertyNames = propertyNames;
+                this._navigationPropertyName = "";
             }
         
             // Getter를 사용하여 엔티티 세부 정보를 반환
             get entityDetails() {
                 return {
-                    model: this.model,
-                    entitySetName: this.entitySetName,
-                    joinKeyPropertyName: this.joinKeyPropertyName,
-                    role: this.role,
-                    propertyNames: this.propertyNames
+                    model: this._model,
+                    entitySetName: this._entitySetName,
+                    joinKeyPropertyName: this._joinKeyPropertyName,
+                    role: this._role,
+                    propertyNames: this._propertyNames,
+                    entityType: this._entityType,
+                    navigationPropertyName: this._navigationPropertyName
                 };
+            }
+
+            set navigationPropertyName(newNavPropNm) {
+                this._navigationPropertyName = newNavPropNm;
             }
         },
 
@@ -364,19 +371,7 @@ sap.ui.define([
             });
         },
 
-        // 주어진 이름의 엔티티 타입을 검색하는 함수
-        _findEntityType: async function(oModel, sEntityTypeName) {
-            const oMetadata = await this._getMetadataAsync(oModel);
-
-            const oEntityType = oMetadata.dataServices.schema
-                .flatMap(oSchema => oSchema.entityType)     // 모든 엔티티 타입 추출
-                .find(entityType => entityType.name === sEntityTypeName); // 주어진 이름의 엔티티 타입 찾기
-
-            if (!oEntityType) {
-                throw new Error(`EntityType '${sEntityTypeName}' not found.`);
-            }
-            return oEntityType;
-        },
+        
         /**
          * 메타데이터에서 주어진 primaryEntity와 subordinateEntity 간의 외래 키 관계를 찾고,
          * NavigationProperty 이름을 반환하는 함수.
@@ -704,6 +699,8 @@ sap.ui.define([
             const nonForeignKeyEntities = [];
         
             for (let subordinateEntity of subordinateEntities) {
+            // for (let i=0; i<subordinateEntities.length; i++) {
+                // const subordinateEntity = subordinateEntities[i];
                 try {
                     // 외래키 관계 여부를 확인하고 외래키가 있으면 foreignKeyEntities로 이동
                     const foreignKeyRelationship = await this._findForeignKeyRelationship(
@@ -711,17 +708,18 @@ sap.ui.define([
                         primaryEntity.entityDetails.entitySetName,
                         subordinateEntity.entityDetails.entitySetName
                     );
-        
+                    
                     if (foreignKeyRelationship) {
-                        foreignKeyEntities.push({
-                            entity: subordinateEntity,
-                            foreignKeyRelationship
-                        });
+                        // sub combindEntity class instance에 navigationProperty 추가
+                        subordinateEntity.navigationPropertyName = foreignKeyRelationship;
+                        foreignKeyEntities.push(subordinateEntity);
                     } else {
                         throw new Error();
                     }
                 } catch (error) {
                     // 외래키 관계가 없으면 nonForeignKeyEntities로 이동
+                    // 엔티티 타입 설정
+                    subordinateEntity.navigationPropertyName = await this._findEntityTypeByEntitySetName(subordinateEntity.entityDetails.model, subordinateEntity.entityDetails.entitySetName).name;
                     nonForeignKeyEntities.push(subordinateEntity);
                 }
             }
@@ -730,7 +728,7 @@ sap.ui.define([
             const expandParams = [];
             if (foreignKeyEntities.length > 0) {
                 foreignKeyEntities.forEach(foreignKeyEntity => {
-                    expandParams.push(foreignKeyEntity.foreignKeyRelationship);
+                    expandParams.push(foreignKeyEntity.entityDetails.navigationPropertyName);
                 });
             }
         
@@ -738,7 +736,11 @@ sap.ui.define([
             const urlParameters = expandParams.length > 0 ? { $expand: expandParams.join(',') } : {};
         
             // 메인 엔티티셋 데이터를 $expand로 읽음
-            let primaryEntityData = await this._readODataAsync(primaryEntity.entityDetails.model, primaryEntity.entityDetails.entitySetName, urlParameters);
+            let primaryEntityData = await this._readODataAsync(
+                primaryEntity.entityDetails.model, 
+                primaryEntity.entityDetails.entitySetName, 
+                urlParameters
+            );
         
             let mergedData = primaryEntityData.results;
         
@@ -752,12 +754,12 @@ sap.ui.define([
                         nonForeignKeyEntity.entityDetails.entitySetName,
                         {}
                     );
-        
+                    
                     // joinKeyProperty를 이용해 JSONModel 데이터 재구성 (메인 엔티티에 서브 엔티티 데이터를 포함시킴)
                     mergedData = this._transformToExpandedStructure(
                         mergedData,
                         subordinateData.results,
-                        nonForeignKeyEntity.entityDetails.entitySetName, // NavigationPropertyname
+                        nonForeignKeyEntity.entityDetails.navigationPropertyName, // navigationPropertyName
                         primaryEntity.entityDetails.joinKeyPropertyName, // Primary key
                         nonForeignKeyEntity.entityDetails.joinKeyPropertyName // Subordinate key
                     );
@@ -791,7 +793,7 @@ sap.ui.define([
         
             // 서브 엔티티 컬럼 추가 및 데이터 바인딩
             subordinateEntities.forEach((subordinateEntity, index) => {
-                const navigationPropertyName = expandParams[index] || subordinateEntity.entityDetails.entitySetName; // 관계가 없을 경우 서브 엔티티 이름 사용
+                const navigationPropertyName = subordinateEntity.entityDetails.navigationPropertyName; // 관계가 없을 경우 서브 엔티티 이름 사용
         
                 subordinateEntity.entityDetails.propertyNames.forEach((subPropertyName) => {
                     const column = new Column({
@@ -810,7 +812,7 @@ sap.ui.define([
                         ...primaryEntity.entityDetails.propertyNames.map(propertyName => new Text({ text: `{tableModel>${propertyName}}` })),
                         // 서브 엔티티의 속성에 대한 데이터 바인딩 (NavigationPropertyName 포함)
                         ...subordinateEntities.flatMap((subordinateEntity, index) => {
-                            const navigationPropertyName = allEntitiesHaveForeignKey ? expandParams[index] : subordinateEntity.entityDetails.entitySetName; // NavigationPropertyName은 엔티티셋 이름으로 설정
+                            const navigationPropertyName = subordinateEntity.entityDetails.navigationPropertyName; // NavigationPropertyName은 엔티티셋 이름으로 설정
                             return subordinateEntity.entityDetails.propertyNames.map(
                                 subPropertyName => new Text({ text: `{tableModel>${navigationPropertyName}/${subPropertyName}}` }) // ODataModel과 JSONModel 동일한 바인딩 경로 사용
                             );
@@ -843,36 +845,56 @@ sap.ui.define([
                 }
             });
         },
-
+        
         /**
-         * 주 엔티티와 서브 엔티티 데이터를 joinKeyProperty를 기반으로 병합하는 함수.
-         * 관계가 없는 경우 순차적으로 병합.
+         * 엔티티셋 이름을 가지고 엔티티 타입 객체를 검색하는 함수
+         * @param {object} oModel - OData 모델 객체
+         * @param {String} sEntitySetName - 검색할 엔티티셋 이름
+         * @returns {object} - 해당 엔티티셋에 대응하는 엔티티 타입 객체
+         * @throws {Error} - 엔티티 타입을 찾을 수 없는 경우 예외를 발생시킴
          */
-        _mergeEntitiesByJoinKey: function(primaryData, subordinateData, primaryKey, subordinateKey) {
-            if (primaryKey && subordinateKey) {
-                // joinKeyProperty를 기반으로 두 엔티티 병합
-                return primaryData.map((primaryItem, index) => {
-                    const matchingSubItem = subordinateData.find(subItem => subItem[subordinateKey] === primaryItem[primaryKey]);
-                    return {
-                        ...primaryItem,
-                        ...(matchingSubItem || {}) // 키가 일치하는 서브 엔티티 항목이 있으면 병합
-                    };
-                });
-            } else {
-                // joinKeyProperty가 없을 경우 순차적으로 병합
-                return primaryData.map((primaryItem, index) => ({
-                    ...primaryItem,
-                    ...(subordinateData[index] || {}) // 순차적으로 서브 엔티티 데이터 병합
-                }));
+        _findEntityTypeByEntitySetName: async function(oModel, sEntitySetName) {
+            // 메타데이터를 비동기적으로 가져옴
+            const oMetadata = await this._getMetadataAsync(oModel);
+
+            // 엔티티셋에 대응하는 엔티티 타입을 메타데이터에서 검색
+            const oEntitySet = oMetadata.dataServices.schema
+                .flatMap(oSchema => oSchema.entityContainer)            // 모든 스키마의 엔티티 컨테이너에서
+                .flatMap(oContainer => oContainer.entitySet)            // 모든 엔티티셋 추출
+                .find(entitySet => entitySet.name === sEntitySetName);  // 주어진 엔티티셋 이름에 해당하는 엔티티셋 찾기
+            
+            // 해당 엔티티셋의 EntityType을 메타데이터에서 검색
+            const oEntityType = oMetadata.dataServices.schema
+                .flatMap(oSchema => oSchema.entityType)     // 모든 엔티티 타입 추출
+                .find(entityType => entityType.name === oEntitySet.entityType.split('.').pop()); // 엔티티셋의 entityType 이름에 맞는 엔티티 타입 찾기
+
+            // 엔티티 타입을 찾지 못하면 에러 발생
+            if(!oEntityType) {
+                console.warn(`EntityType '${oEntitySet.entityType}' not found.`);
+                oEntityType = {name: sEntitySetName}
             }
-        },
+
+            return oEntityType;
+        },  
 
         /**
-         * 메인 엔티티셋의 데이터 수에 맞게 서브 엔티티 데이터를 조정하는 함수.
+         * 엔티티 타입 이름(문자열)으로 엔티티 타입 객체를 검색하는 함수
+         * @param {object} oModel 
+         * @param {string} sEntityTypeName 
+         * @returns {object} - 해당 엔티티셋에 대응하는 엔티티 타입 객체
+         * @throws {Error} - 엔티티 타입을 찾을 수 없는 경우 예외를 발생시킴
          */
-        _adjustToMainEntityCount: function(mainEntityData, mergedData) {
-            const mainEntityCount = mainEntityData.length;
-            return mergedData.slice(0, mainEntityCount); // 메인 엔티티셋의 데이터 수에 맞게 자르기
-        }        
+        _findEntityType: async function(oModel, sEntityTypeName) {
+            const oMetadata = await this._getMetadataAsync(oModel);
+
+            const oEntityType = oMetadata.dataServices.schema
+                .flatMap(oSchema => oSchema.entityType)     // 모든 엔티티 타입 추출
+                .find(entityType => entityType.name === sEntityTypeName); // 주어진 이름의 엔티티 타입 찾기
+
+            if (!oEntityType) {
+                throw new Error(`EntityType '${sEntityTypeName}' not found.`);
+            }
+            return oEntityType;
+        },        
     });
 });
