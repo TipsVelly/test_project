@@ -560,119 +560,6 @@ sap.ui.define([
                 })
             });
         },
-
-        /**
-         * 메타데이터에서 주어진 primaryEntity와 subordinateEntity 간의 외래 키 관계를 찾고,
-         * NavigationProperty 이름을 반환하는 함수.
-         * 
-         * @param {Object} oModel - ODataModel 인스턴스
-         * @param {String} primaryEntitySetName - 주 엔티티의 EntitySet 이름
-         * @param {String} subordinateEntitySetName - 종속 엔티티의 EntitySet 이름
-         * @returns {Promise<String>} - NavigationProperty 이름을 반환하는 Promise
-         */
-        loadCombinedEntitiesV1: async function(...combinedEntities) {
-            // 주 엔티티와 서브 엔티티의 수를 검증
-            const primaryEntity = this._validateEntitiesAndFindPrimaryEntity(combinedEntities);
-
-            // 서브 엔티티들 찾기
-            const subordinateEntities = combinedEntities.filter((entity) => entity.entityDetails.role === this.EntityRoleType.SUBORDINATE);
-
-            // 외래 키 관계 및 $expand 파라미터 준비
-            const expandParams = await this._prepareExpandParams(primaryEntity, subordinateEntities);
-
-            // 테이블 설정 및 바인딩 처리
-            this._setupTable(primaryEntity, subordinateEntities, expandParams);
-        },
-
-        /**
-         * 주어진 엔티티 배열에서 주 엔티티를 검증 및 반환
-         */
-        _validateEntitiesAndFindPrimaryEntity: function(combinedEntities) {
-            const primaryEntityCount = combinedEntities.filter((combindEntity) => combindEntity.entityDetails.role === this.EntityRoleType.PRIMARY).length;
-            if (primaryEntityCount > 1) {
-                throw new Error("primary entity가 2개 이상 존재합니다.");
-            } else if (primaryEntityCount < 1) {
-                throw new Error("primary entity가 존재하지 않습니다.");
-            }
-            
-            // 주 엔티티 찾기
-            return combinedEntities.find((entity) => entity.entityDetails.role === this.EntityRoleType.PRIMARY);            
-        },
-
-        /**
-         * 주 엔티티와 서브 엔티티 간의 외래 키 관계를 확인하고 $expand 파라미터를 준비
-         */
-        _prepareExpandParams: async function(primaryEntity, subordinateEntities) {
-            const expandParams = [];
-            if (subordinateEntities.length > 0) {
-                console.log("subordinateEntities exists and start expand reading");
-
-                for (let subordinateEntity of subordinateEntities) {
-                    const foreignKeyRelationship = await this._findForeignKeyRelationship(
-                        primaryEntity.entityDetails.model,
-                        primaryEntity.entityDetails.entitySetName,
-                        subordinateEntity.entityDetails.entitySetName
-                    );
-
-                    if (foreignKeyRelationship) {
-                        expandParams.push(foreignKeyRelationship);
-                    } else {
-                        throw new Error(`Subordinate entity '${subordinateEntity.entityDetails.entitySetName}' does not have a foreign key relationship with the primary entity.`);
-                    }
-                }
-            }
-            return expandParams;
-        },
-        
-        /**
-         * 테이블 설정 및 컬럼, 데이터 바인딩 처리
-         */
-        _setupTable: function(primaryEntity, subordinateEntities, expandParams) {
-            const table = this.getView().byId("main_table");
-            table.setModel(primaryEntity.entityDetails.model, "tableModel");
-
-            // 테이블의 기존 컬럼을 모두 삭제
-            table.removeAllColumns();
-
-            // 컬럼 추가 함수
-            const addColumn = (headerText) => {
-                table.addColumn(new sap.m.Column({
-                    header: new sap.m.Label({ text: headerText })
-                }));
-            };
-
-            // 주 엔티티 컬럼 추가
-            primaryEntity.entityDetails.propertyNames.forEach(addColumn);
-
-            // 서브 엔티티 컬럼 추가
-            subordinateEntities.forEach((subordinateEntity, index) => {
-                const navigationPropertyName = expandParams[index];
-                subordinateEntity.entityDetails.propertyNames.forEach((subPropertyName) => {
-                    addColumn(`${navigationPropertyName}_${subPropertyName}`);
-                });
-            });
-
-            // 테이블 아이템에 데이터 바인딩 (ODataModel에서 바로 바인딩)
-            table.bindItems({
-                path: `tableModel>/${primaryEntity.entityDetails.entitySetName}`,
-                parameters: {
-                    expand: expandParams.join(',')
-                },
-                template: new sap.m.ColumnListItem({
-                    cells: [
-                        // 주 엔티티 속성 바인딩
-                        ...primaryEntity.entityDetails.propertyNames.map(propertyName => new sap.m.Text({ text: `{tableModel>${propertyName}}` })),
-                        // 서브 엔티티 속성 바인딩
-                        ...subordinateEntities.flatMap((subordinateEntity, index) => {
-                            const navigationPropertyName = expandParams[index];
-                            return subordinateEntity.entityDetails.propertyNames.map(subPropertyName => 
-                                new sap.m.Text({ text: `{tableModel>${navigationPropertyName}/${subPropertyName}}` })
-                            );
-                        })
-                    ]
-                })
-            });
-        },
         
         /**
          * 주어진 엔티티들 간의 데이터를 결합하여 테이블에 바인딩하는 함수
@@ -845,7 +732,7 @@ sap.ui.define([
                 }
             });
         },
-        
+
         /**
          * 엔티티셋 이름을 가지고 엔티티 타입 객체를 검색하는 함수
          * @param {object} oModel - OData 모델 객체

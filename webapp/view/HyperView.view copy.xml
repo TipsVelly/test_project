@@ -1,0 +1,88 @@
+<mvc:View 
+	controllerName="{{CONTROLLER_FILE_PATH}}" 
+	xmlns:mvc="sap.ui.core.mvc" displayBlock="true" 
+	xmlns="sap.m" 
+	xmlns:f="sap.f" 
+	xmlns:core="sap.ui.core" 
+	xmlns:form="sap.ui.layout.form">
+	<f:DynamicPage toggleHeaderOnTitleClick="false"
+>
+		<f:title>
+			<f:DynamicPageTitle>
+				<f:heading>
+					<Title text="{{TEMPLATE_TITLE}}">
+					</Title>
+				</f:heading>
+			</f:DynamicPageTitle>
+		</f:title>
+		<f:header>
+			<f:DynamicPageHeader pinnable="false">
+				<FlexBox direction="Row">
+					<FlexBox direction="Column" class="paddingL3">
+						<form:SimpleForm 
+							id="search_form" 
+							editable="true" 
+							layout="ColumnLayout" 
+							columnsM="2 " 
+							columnsL="2" 
+							columnsXL="3" 
+							labelSpanM="3" 
+							labelSpanL="3" 
+							labelSpanXL="3"
+						>
+							<form:content>
+								{{TEMPLATE_SEARCH_FIELDS}}
+							</form:content>
+						</form:SimpleForm>
+						<layoutData>
+							<FlexItemData growFactor="5" baseSize="0">
+							</FlexItemData>
+						</layoutData>
+					</FlexBox>
+					<FlexBox justifyContent="Center" alignItems="Center" class="mainBtn" direction="Column">
+						<Button icon="sap-icon://search" type="Emphasized" width="80px" text="검색" press="onSearch">
+						</Button>
+						<layoutData>
+							<FlexItemData growFactor="1" baseSize="0">
+							</FlexItemData>
+						</layoutData>
+					</FlexBox>
+				</FlexBox>
+			</f:DynamicPageHeader>
+		</f:header>
+		<f:content>
+			<Table 
+				id="main_table" 
+				growing="true" 
+				growingThreshold="20" 
+				growingScrollToLoad="true" 
+				mode="MultiSelect" 
+				itemPress="onListItemPress" 
+				items="{{{TABLE_MODEL}}>/{{ENTITYSET_NAME}}}" 
+				width="auto" 
+				class="sapUiMediumMarginBottom"
+			>
+				<headerToolbar>
+					<OverflowToolbar>
+						<ToolbarSpacer>
+						</ToolbarSpacer>
+							<Button icon="sap-icon://add" type="Transparent" press="onAdd" id="btn_add">
+						</Button>
+							<Button icon="sap-icon://delete" type="Transparent" press="onDelete" id="btn_del">
+						</Button>
+					</OverflowToolbar>
+				</headerToolbar>
+				<columns>
+					{{TEMPLATE_TABLE_COLUMNS}}
+				</columns>
+				<items>
+					<ColumnListItem vAlign="Middle" type="Navigation" >
+						<cells>
+							{{TEMPLATE_TABLE_DATA}}
+						</cells>
+					</ColumnListItem>
+				</items>
+			</Table>
+		</f:content>
+	</f:DynamicPage>
+</mvc:View>
